@@ -1,0 +1,9 @@
+questions:
+  # Business-owned. Each row is a question and a description of what a good
+  # answer contains. An LLM judge reads the agent's reply and scores it against
+  # that description. Do not name tools: describe what good looks like, not how
+  # the agent gets there. Replace these examples with your own (4 to 8 is plenty).
+  - question: "Replace me with a question your users really ask."
+    good_answer: "A good answer states ... and cites ... A poor answer ..."
+  - question: "Replace me with a question the agent should decline."
+    good_answer: "A good answer says it cannot answer this and does not guess."

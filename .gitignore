@@ -1,0 +1,9 @@
+.venv/
+site/
+.DS_Store
+__pycache__/
+*.pyc
+.pytest_cache/
+dcm/out/
+cortex_project/
+.snowflake/

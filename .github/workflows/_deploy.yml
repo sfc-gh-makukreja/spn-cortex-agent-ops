@@ -1,0 +1,98 @@
+# Deploys one environment: DCM (agent home, stages, audience roles), the semantic
+# views, then a new agent version. Test (UAT) also scores the version and puts the
+# report on the run page for the business, then promotes. Prod promotes and tags the
+# release. Permissions come from the caller: only prod can write.
+name: Deploy environment
+
+on:
+  workflow_call:
+    inputs:
+      environment: { required: true, type: string }   # test | prod
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  deploy:
+    name: ${{ inputs.environment }}
+    runs-on: ubuntu-latest
+    # The environment is what the Snowflake user trusts: the OIDC subject names it,
+    # and its variables say which account and user to sign in as.
+    environment: ${{ inputs.environment }}
+    env:
+      SNOWFLAKE_ACCOUNT: ${{ vars.SNOWFLAKE_ACCOUNT }}
+      SNOWFLAKE_USER: ${{ vars.SNOWFLAKE_USER }}
+      SNOWFLAKE_ROLE: AGENTOPS_DEPLOYER_${{ inputs.environment }}   # role names are case-insensitive
+      SNOWFLAKE_AUTHENTICATOR: WORKLOAD_IDENTITY
+      SNOWFLAKE_WORKLOAD_IDENTITY_PROVIDER: OIDC
+      TARGET: ${{ inputs.environment }}
+      LABEL: ${{ github.sha }}
+      RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0   # tags, for the release name
+      - uses: ./.github/actions/setup
+
+      - name: DCM deploy
+        working-directory: dcm
+        run: |
+          snow dcm create --target "${TARGET^^}" --if-not-exists -x
+          snow dcm deploy --target "${TARGET^^}" --alias "$LABEL" -x
+
+      # Created after DCM, which makes AGENTS_<ENV>.CONTEXT.
+      - name: Semantic views
+        run: |
+          for sv in $(ops semantic-views); do
+            ops semantic-view "$sv" "${TARGET^^}" > "$RUNNER_TEMP/sv.sql"
+            snow sql -x --enable-templating NONE -f "$RUNNER_TEMP/sv.sql"
+          done
+
+      - name: Add agent version
+        run: |
+          subject=$(git log -1 --format=%s)
+          note="${GITHUB_SHA::7} · ${subject//\'/} · $RUN_URL"
+          ops render agent/agent.yaml "$TARGET" > "$RUNNER_TEMP/agent_spec.yaml"
+          ops sql "$TARGET" ops/release.sql -D label="$LABEL" -D note="$note" -D spec="$RUNNER_TEMP/agent_spec.yaml"
+          echo "**Agent version:** $note" >> "$GITHUB_STEP_SUMMARY"
+
+      # Test is UAT: score the new version and put the result on the run page, where
+      # the business reads it before approving prod. It informs that decision and
+      # blocks nothing. Not in prod, which ships the commit scored here.
+      - name: Publish evaluation dataset and config
+        if: inputs.environment == 'test'
+        run: |
+          ops eval-dataset "${TARGET^^}" > "$RUNNER_TEMP/dataset.sql"
+          snow sql -x --enable-templating NONE -f "$RUNNER_TEMP/dataset.sql"
+          ops eval-config > "$RUNNER_TEMP/eval_config.yaml"
+
+      - name: Evaluate
+        if: inputs.environment == 'test'
+        run: |
+          ops sql "$TARGET" ops/evaluate.sql -D run="${TARGET^^}-${LABEL::7}-${GITHUB_RUN_ATTEMPT}" \
+            -D config="$RUNNER_TEMP/eval_config.yaml"
+
+      - name: Evaluation report
+        if: inputs.environment == 'test' && !cancelled()
+        run: |
+          ops sql "$TARGET" ops/eval_report.sql -D run="${TARGET^^}-${LABEL::7}-${GITHUB_RUN_ATTEMPT}" \
+            --format json | jq -r '.[-1].REPORT' > "$RUNNER_TEMP/report.md"
+          cat "$RUNNER_TEMP/report.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Set the alias
+        run: |
+          ops sql "$TARGET" ops/promote.sql -D commit="${GITHUB_SHA::7}"
+          echo "**Alias set:** \`PROD\` on the ${TARGET} agent now points to \`${GITHUB_SHA::7}\`, which is also the default" >> "$GITHUB_STEP_SUMMARY"
+
+      # Only once prod has the release: the tag, on this commit, and the GitHub
+      # Release. A failed prod leaves no release behind.
+      - name: GitHub Release
+        if: inputs.environment == 'prod'
+        run: |
+          release=$(date -u +%Y.%m.%d)-$(( $(git tag -l "$(date -u +%Y.%m.%d)-*" | wc -l) + 1 ))
+          url=$(gh release create "$release" --target "$GITHUB_SHA" --title "$release · ${GITHUB_SHA::7}" \
+            --generate-notes --latest)
+          echo "### Released [$release]($url)" >> "$GITHUB_STEP_SUMMARY"

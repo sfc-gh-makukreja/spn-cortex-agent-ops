@@ -1,0 +1,42 @@
+site_name: Cortex Agent Ops
+site_description: Take any Cortex Agent into a dev, test and prod CI/CD flow on Snowflake
+repo_url: https://github.com/sfc-gh-makukreja/spn-cortex-agent-ops
+theme:
+  name: material
+  logo: images/snowflake-symbol-white.png
+  favicon: images/snowflake-symbol.png
+  palette:
+    primary: light blue
+  features:
+    - navigation.footer
+    - content.code.copy
+    - toc.integrate
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - toc:
+      permalink: true
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - attr_list
+  - md_in_html
+  - tables
+nav:
+  - Home: index.md
+  - Get started:
+      - Prerequisites: getting-started.md
+      - 1. Adopt your agent: adopt.md
+      - 2. Set up CI/CD: setup.md
+  - The lifecycle in practice:
+      - Overview: lifecycle/index.md
+      - Develop: lifecycle/develop.md
+      - Evaluate: lifecycle/evaluate.md
+      - Gates: lifecycle/gates.md
+      - Release and rollback: lifecycle/release.md
+      - Traceability: lifecycle/traceability.md
+      - Access by environment: lifecycle/access.md
+      - Monitor: lifecycle/monitor.md
+  - Naming convention and data: naming.md
+  - Gotchas: gotchas.md
+  - Credits: credits.md

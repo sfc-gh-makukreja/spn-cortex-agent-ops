@@ -1,0 +1,67 @@
+# Every pull request into main: checks, and the DCM plan posted on the PR.
+# Never deploys. The business reviews at the prod approval instead.
+name: PR
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, edited, synchronize, reopened]
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  plan:
+    name: DCM plan (dev)
+    runs-on: ubuntu-latest
+    environment: dev
+    permissions:
+      contents: read
+      id-token: write
+      pull-requests: write
+    env:
+      SNOWFLAKE_ACCOUNT: ${{ vars.SNOWFLAKE_ACCOUNT }}
+      SNOWFLAKE_USER: ${{ vars.SNOWFLAKE_USER }}
+      SNOWFLAKE_ROLE: AGENTOPS_DEPLOYER_DEV
+      SNOWFLAKE_AUTHENTICATOR: WORKLOAD_IDENTITY
+      SNOWFLAKE_WORKLOAD_IDENTITY_PROVIDER: OIDC
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/setup
+
+      - name: Tests, and the spec and semantic views render
+        run: |
+          pytest -q
+          ops render agent/agent.yaml DEV > /dev/null
+          for sv in $(ops semantic-views); do ops render "$sv" DEV > /dev/null; done
+
+      - name: DCM plan
+        working-directory: dcm
+        run: |
+          snow dcm create --target DEV --if-not-exists -x
+          snow dcm plan --target DEV --save-output -x
+          {
+            echo "### DCM plan (dev)"
+            echo
+            echo "See the plan output in the job log. Plan files: \`dcm/out/\`."
+          } | tee plan.md >> "$GITHUB_STEP_SUMMARY"
+
+      # The semantic view is YAML outside DCM, so its plan does not check it.
+      # Snowflake validates it against the dev tables without creating anything.
+      - name: Semantic views are valid (dev)
+        run: |
+          for sv in $(ops semantic-views); do
+            ops semantic-view "$sv" DEV --check > "$RUNNER_TEMP/sv.sql"
+            snow sql -x --enable-templating NONE -f "$RUNNER_TEMP/sv.sql"
+          done
+
+      - name: Comment on the PR
+        if: always() && hashFiles('dcm/plan.md') != ''
+        run: gh pr comment "${{ github.event.pull_request.number }}" --body-file dcm/plan.md --edit-last --create-if-none

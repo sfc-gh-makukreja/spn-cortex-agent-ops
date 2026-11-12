@@ -1,0 +1,41 @@
+# Make an earlier release PROD and the default again. Only the agent spec moves:
+# context and tools have no versions, so a fix to them rolls forward through main.
+name: Rollback
+
+on:
+  workflow_dispatch:
+    inputs:
+      release:
+        description: Release to go back to, e.g. 2026.10.13-1, or a commit
+        required: true
+
+permissions:
+  contents: read
+  id-token: write
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  rollback:
+    runs-on: ubuntu-latest
+    environment: prod
+    env:
+      SNOWFLAKE_ACCOUNT: ${{ vars.SNOWFLAKE_ACCOUNT }}
+      SNOWFLAKE_USER: ${{ vars.SNOWFLAKE_USER }}
+      SNOWFLAKE_ROLE: AGENTOPS_DEPLOYER_PROD
+      SNOWFLAKE_AUTHENTICATOR: WORKLOAD_IDENTITY
+      SNOWFLAKE_WORKLOAD_IDENTITY_PROVIDER: OIDC
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: ./.github/actions/setup
+      - name: Roll back
+        env:
+          RELEASE: ${{ inputs.release }}
+        run: |
+          sha=$(git rev-parse --verify -q "$RELEASE^{commit}") || { echo "::error::Not a release or commit: $RELEASE"; exit 1; }
+          ops sql PROD ops/promote.sql -D commit="${sha::7}"

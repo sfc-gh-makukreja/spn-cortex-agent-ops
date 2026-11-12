@@ -1,0 +1,37 @@
+# The one place you edit. Everything else (DCM manifest, grants, bootstrap SQL,
+# workflows) is generated from or reads this file.
+
+agent:
+  name: MY_AGENT                       # object name, same in every environment
+  display_name: My Agent               # shown in CoWork; PROD uses it as is, others get " (DEV)" etc.
+  comment: Describe what the agent does.
+  spec: agent/agent.yaml               # written by `ops adopt`, always with DEV names
+  semantic_views:                      # written by `ops adopt`: files deployed to AGENTS_<ENV>.CONTEXT
+    - agent/semantic_view.sv.yaml
+
+# Your data. Out of scope for this repo: you bring it, one database per
+# environment named <NAME>_DEV, <NAME>_TEST, <NAME>_PROD. See docs/naming.md.
+data_databases:
+  - MYDATA
+
+# Who uses the agent in each environment (optional). One Snowflake user per
+# audience; a role MY_AGENT_<ENV>_USER is created and granted to them.
+audiences:
+  TEST: UAT_USER
+  PROD: PROD_USER
+
+# Raw grant statements added to every audience role, for anything the
+# generator cannot see (use {env} for the environment).
+extra_grants: []
+
+snowflake:
+  account: ORG-ACCOUNT                 # account identifier, e.g. MYORG-MYACCOUNT
+  ci_warehouse: AGENTOPS_CI_WH
+  dcm_database: PLATFORM_CONTROL       # holds the DCM project objects
+  dcm_schema: PROJECTS
+
+github:
+  repo: OWNER/REPO                     # filled in by the setup-cicd skill
+  approvers:
+    test: ""                           # GitHub team or user that approves the test gate
+    prod: ""                           # GitHub team or user that approves the prod gate (the business)

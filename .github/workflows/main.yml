@@ -1,0 +1,37 @@
+# Every merge to main rolls forward through test and prod:
+#   test   UAT. Deploy, evaluate (report on the run page), promote.
+#          Set the test environment's required reviewers to engineering.
+#   prod   The business approves, having read test's evaluation and tried the
+#          change in UAT; deploy, promote, then tag and publish the GitHub Release.
+#          Set the prod environment's required reviewers to the business.
+# A run waiting for approval holds the queue; a newer merge replaces any run
+# still waiting to start.
+name: Main
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ['docs/**', '**.md', 'mkdocs.yml']
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: main
+  cancel-in-progress: false
+
+jobs:
+  test:
+    uses: ./.github/workflows/_deploy.yml
+    with:
+      environment: test
+
+  prod:
+    needs: test
+    permissions:
+      contents: write   # the release tag and GitHub Release
+      id-token: write
+    uses: ./.github/workflows/_deploy.yml
+    with:
+      environment: prod
