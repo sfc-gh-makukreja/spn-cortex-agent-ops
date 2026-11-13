@@ -55,10 +55,14 @@ def parse_fqn(value: str) -> tuple[str, str, str]:
 
 def spec_dependencies(spec: dict) -> dict:
     """What the agent's tools touch, read from tool_resources in the spec."""
-    deps = {"semantic_views": [], "search_services": [], "functions": [], "procedures": []}
+    deps = {"semantic_views": [], "search_services": [], "functions": [], "procedures": [],
+            "warehouses": []}
     for res in (spec.get("tool_resources") or {}).values():
         if not isinstance(res, dict):
             continue
+        env_ = res.get("execution_environment") or {}
+        if env_.get("warehouse"):
+            deps["warehouses"].append(env_["warehouse"])
         if res.get("semantic_view"):
             deps["semantic_views"].append(res["semantic_view"])
         if res.get("search_service"):
@@ -90,22 +94,29 @@ def adopt(spec_path: Path, out_dir: Path, mappings: dict[str, str], sv_paths: li
     out_dir.mkdir(parents=True, exist_ok=True)
     notes = []
     spec_text = remap(spec_path.read_text())
+
+    # Semantic views are deployed by the pipeline to AGENTS_<ENV>.CONTEXT under the
+    # name inside the YAML, so the spec must point there and the file take that name.
+    for sv_path in sv_paths:
+        sv_text = remap(sv_path.read_text())
+        sv_name = str(yaml.safe_load(sv_text)["name"])
+        target = out_dir / f"{sv_name.lower()}.sv.yaml"
+        target.write_text(sv_text)
+        notes.append(f"wrote {target}")
+        spec_text = re.sub(rf"[\w$\"]+\.[\w$\"]+\.{re.escape(sv_name)}\b",
+                           f"AGENTS_DEV.CONTEXT.{sv_name}", spec_text, flags=re.IGNORECASE)
+
     spec = yaml.safe_load(spec_text)
     (out_dir / "agent.yaml").write_text(spec_text)
     notes.append(f"wrote {out_dir / 'agent.yaml'}")
 
     data_dev = {f"{d.upper()}_DEV" for d in cfg.get("data_databases", [])} | {"AGENTS_DEV"}
-    for fqn in sum(spec_dependencies(spec).values(), []):
+    deps = spec_dependencies(spec)
+    for fqn in [f for k, v in deps.items() if k != "warehouses" for f in v]:
         db = parse_fqn(fqn.split("(")[0])[0]
         if db.upper() not in data_dev:
             notes.append(f"WARNING {fqn}: database {db} does not follow <NAME>_DEV; "
                          "add --map OLD=NEW or a data_databases entry in agentops.yml")
-    for sv_path in sv_paths:
-        sv_text = remap(sv_path.read_text())
-        yaml.safe_load(sv_text)
-        target = out_dir / f"{sv_path.name.split('.')[0]}.sv.yaml"
-        target.write_text(sv_text)
-        notes.append(f"wrote {target}")
     return notes
 
 
@@ -154,6 +165,9 @@ def access_sql(cfg: dict, spec: dict, sv_docs: list[dict]) -> str:
             lines.append(f"GRANT USAGE ON SCHEMA {tmpl(db + '.' + schema, cfg)} TO ROLE {r};")
 
     lines += ["", "-- The agent's tools"]
+    for wh_name in deps["warehouses"]:
+        if wh_name.upper() != wh.upper():
+            lines.append(f"GRANT USAGE ON WAREHOUSE {wh_name} TO ROLE {r};")
     for fqn in deps["semantic_views"]:
         grant_container(fqn)
         lines.append(f"GRANT SELECT ON SEMANTIC VIEW {tmpl(fqn, cfg)} TO ROLE {r};")

@@ -43,8 +43,11 @@ def test_adopt_maps_names_and_flags_unconventional_databases(tmp_path):
     sv.write_text(SV)
     notes = cli.adopt(spec, tmp_path / "out", {"DEMO_DB": "SALES_DEV"}, [sv], CFG)
     assert not any(n.startswith("WARNING") for n in notes)
-    assert "SALES_DEV.CORE.ORDERS_SV" in (tmp_path / "out" / "agent.yaml").read_text()
-    assert "SALES_DEV" in (tmp_path / "out" / "orders.sv.yaml").read_text()
+    # The semantic view is deployed to AGENTS_<ENV>.CONTEXT under the name in its YAML
+    agent_yaml = (tmp_path / "out" / "agent.yaml").read_text()
+    assert "AGENTS_DEV.CONTEXT.ORDERS_SV" in agent_yaml
+    assert "SALES_DEV.CORE.DOCS_SEARCH" in agent_yaml
+    assert "SALES_DEV" in (tmp_path / "out" / "orders_sv.sv.yaml").read_text()
 
     notes = cli.adopt(spec, tmp_path / "out2", {}, [], CFG)
     assert any(n.startswith("WARNING") for n in notes)
@@ -67,6 +70,13 @@ def test_access_sql_grants_exactly_what_the_tools_touch():
     assert "GRANT USAGE ON FUNCTION SALES_{{ env }}.CORE.RECOMPUTE(FLOAT)" in sql
     assert "GRANT SELECT ON TABLE SALES_{{ env }}.CORE.ORDERS" in sql
     assert "GRANT USAGE ON DATABASE SALES_{{ env }}" in sql
+
+
+def test_tool_warehouse_is_granted_to_the_audience_role():
+    spec = {"tool_resources": {"Analyst": {"semantic_view": "SALES_DEV.CORE.SV",
+                                           "execution_environment": {"type": "warehouse", "warehouse": "TOOL_WH"}}}}
+    assert cli.spec_dependencies(spec)["warehouses"] == ["TOOL_WH"]
+    assert "GRANT USAGE ON WAREHOUSE TOOL_WH TO ROLE MY_AGENT_{{ env }}_USER" in cli.access_sql(CFG, spec, [])
 
 
 def test_manifest_has_one_target_per_environment():
