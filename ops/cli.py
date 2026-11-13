@@ -103,7 +103,7 @@ def adopt(spec_path: Path, out_dir: Path, mappings: dict[str, str], sv_paths: li
         target = out_dir / f"{sv_name.lower()}.sv.yaml"
         target.write_text(sv_text)
         notes.append(f"wrote {target}")
-        spec_text = re.sub(rf"[\w$\"]+\.[\w$\"]+\.{re.escape(sv_name)}\b",
+        spec_text = re.sub(rf"\b[\w$]+\.[\w$]+\.{re.escape(sv_name)}\b",
                            f"AGENTS_DEV.CONTEXT.{sv_name}", spec_text, flags=re.IGNORECASE)
 
     spec = yaml.safe_load(spec_text)

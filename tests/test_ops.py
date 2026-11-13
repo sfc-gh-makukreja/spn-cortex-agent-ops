@@ -18,7 +18,7 @@ tools:
   - tool_spec: {type: cortex_search, name: Search}
   - tool_spec: {type: generic, name: Recompute}
 tool_resources:
-  Analyst: {semantic_view: DEMO_DB.CORE.ORDERS_SV}
+  Analyst: {semantic_view: "DEMO_DB.CORE.ORDERS_SV"}
   Search: {search_service: DEMO_DB.CORE.DOCS_SEARCH}
   Recompute: {type: function, identifier: "DEMO_DB.CORE.RECOMPUTE(FLOAT)"}
 """
@@ -46,6 +46,9 @@ def test_adopt_maps_names_and_flags_unconventional_databases(tmp_path):
     # The semantic view is deployed to AGENTS_<ENV>.CONTEXT under the name in its YAML
     agent_yaml = (tmp_path / "out" / "agent.yaml").read_text()
     assert "AGENTS_DEV.CONTEXT.ORDERS_SV" in agent_yaml
+    # the parsed value is exact: quoting must survive the rewrite
+    adopted = yaml.safe_load(agent_yaml)
+    assert adopted["tool_resources"]["Analyst"]["semantic_view"] == "AGENTS_DEV.CONTEXT.ORDERS_SV"
     assert "SALES_DEV.CORE.DOCS_SEARCH" in agent_yaml
     assert "SALES_DEV" in (tmp_path / "out" / "orders_sv.sv.yaml").read_text()
 
